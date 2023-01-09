@@ -28,16 +28,17 @@ struct Paths
 		struct explored_path
 		{
 			vector<int> path;
-			vector<int> prefixes;
 		};
 		vector<explored_path> paths;
+		vector<int> valid_paths;
 	};
 	unordered_map<int, PrefixPaths> paths;
 
-	void AddPath(const vector<int>& path, const vector<int>& invalidated_prefixes)
+	void AddPath(const vector<int>& path)
 	{
 		auto& container = paths[path.back()];
-		container.paths.push_back({ path, invalidated_prefixes });
+		container.paths.push_back({ path });
+		container.valid_paths.push_back(-1);
 	}
 
 };
@@ -89,15 +90,22 @@ struct Node
 			}
 			
 			Node* split_node = new Node{ string{pattern.begin() + index, pattern.end() }, bIsFinal, {} };
+			split_node->parent = this;
 			split_node->children.push_back(split_node);
 			
 			if (index < word.size())
 			{
 				Node* subword_node = new Node{ string{ word.begin() + index, word.end()}, true, { } };
+				subword_node->parent = this;
 				split_node->children.push_back(subword_node);
 			}
 
 			pattern = std::string{ pattern.begin(), pattern.begin() + index };
+
+			for (auto& c : children)
+			{
+				c->parent = split_node;
+			}
 			swap(split_node->children, children);
 			bIsFinal = index == word.size();
 			return true;
@@ -112,7 +120,7 @@ struct Node
 		{
 			cout << "---";
 		}
-		cout << pattern << endl;
+		//cout << pattern << endl;
 		for (auto& cl : children)
 		{
 			cl->print(indent + 1);

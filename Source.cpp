@@ -14,31 +14,41 @@
 using namespace std;
 
 
-//struct SuffixesFindResult
-//{
-//    vector<int[]>
-//}
-//
-//void SearchNode(Node node, vector<int> StartSymbols)
-//{
-//    SuffixesFindResult Result{ node.pattern.size() };
-//    find_suffixes(StartSymbols, node.pattern, Result);
-//    if (Node.IsFinal() && !Result.Empty())
-//    {
-//        out.emplace(word);
-//    }
-//    for (C : Children)
-//    {
-//        SearchNode(C, Result.GetLastSymbolsNeighbors(C.GetFirstCharacter()));
-//    }
-//}
+class ChronoProfiler
+{
+public:
+    ChronoProfiler(const std::string& name) : m_name(name), m_start(std::chrono::steady_clock::now())
+    {
+    }
+
+    ~ChronoProfiler()
+    {
+        auto end = std::chrono::steady_clock::now();
+        auto elapsed_time = std::chrono::duration_cast<std::chrono::milliseconds>(end - m_start).count();
+
+        // Add elapsed time to timer with the same name
+        s_timers[m_name] += elapsed_time;
+    }
+
+    // Static function to print elapsed time for a specific timer
+    static void printTime(const std::string& name)
+    {
+        std::cout << name << " elapsed time: " << s_timers[name] << "ms" << std::endl;
+    }
+
+private:
+    std::string m_name;
+    std::chrono::steady_clock::time_point m_start;
+
+    // Static map to store timers
+    inline static std::unordered_map<std::string, long long> s_timers;
+};
 
 template<class T>
 bool contains(const vector<T>& container, const T& Val)
 {
     return find(container.begin(), container.end(), Val) != container.end();
 }
-
 
 struct cell
 {
@@ -77,13 +87,16 @@ struct cell
     }
 };
 
-
 using SymbolsMapType = vector<int>[30];
 
 void BuildStartSymbolsMap(const vector<vector<char>>& board, SymbolsMapType& table)
 {
-    const int m = board.size();
-    const int n = board[0].size();
+    const int m = (int)board.size();
+    const int n = (int)board[0].size();
+    for (auto& t : table)
+    {
+        t.reserve(m * n);
+    }
     for (int i = 0; i < m; ++i)
     {
         for (int j = 0; j < n; ++j)
@@ -120,27 +133,23 @@ struct SuffixesFinder
         bool found = false;
         for (auto key : keys)
         {
-            const auto& paths = node.paths.paths.find(key)->second.paths;
-            for (int i = 0; i < paths.size(); ++i)
+            const auto& paths = node.paths.paths.find(key)->second;
+            for (int i = 0; i < paths.paths.size(); ++i)
             {
-                const auto& path{ paths[i] };
-                if (!path.prefixes.size())
+                const auto& path{ paths.paths[i] };
+                if (paths.valid_paths[i] != -1)
                 {
-                    return true;
+                    continue;
                 }
                 if (find(path.path.begin(), path.path.end(), idx) == path.path.end())
                 {
                     if (node.parent)
                     {
-                        bool found = has_valid_path(*node.parent, path.prefixes, idx);
+                        bool found = has_valid_path(*node.parent, { path.path[0] }, idx);
                         if (found)
                         {
                             return true;
                         }
-                        //if (!found)
-                        //{
-                        //    invalid_indices.push_back(i);
-                        //}
                     }
                     else
                     {
@@ -152,18 +161,58 @@ struct SuffixesFinder
         return false;
     }
 
+    void invalidate_paths(Node& node, const vector<int>& keys, int idx)
+    {
+        for (auto key : keys)
+        {
+            auto& paths = node.paths.paths.find(key)->second;
+            for (int i = 0; i < paths.paths.size(); ++i)
+            {
+                auto& path{ paths.paths[i] };
+                if (paths.valid_paths[i] != -1)
+                {
+                    continue;
+                }
+                if (find(path.path.begin(), path.path.end(), idx) == path.path.end())
+                {
+                    if (!node.parent)
+                    {
+                        continue;
+                    }
+                    if (bool res = has_valid_path(*node.parent, { path.path[0] }, idx))
+                    {
+                        continue;
+                    }
+                }
+                paths.valid_paths[i] = idx;
+            }
+        }
+    }
+
+    void validate_paths(Node& node, const vector<int>& keys, int idx)
+    {
+        for (auto key : keys)
+        {
+            auto& paths = node.paths.paths.find(key)->second;
+            for (int i = 0; i < paths.paths.size(); ++i)
+            {
+                auto& path{ paths.paths[i] };
+                if (paths.valid_paths[i] == idx)
+                {
+                    paths.valid_paths[i] = -1;
+                }
+            }
+        }
+    }
+
     SymbolsMapType symbol_table;
 
     bool search_impl(Node& node, vector<int>& path, int start, int idx, const string& pattern, bool bFindFirst)
     {
         int cached_idx = idx;
+        int path_size = (int)path.size();
         memset(visited, false, m * n * visited_width);
-        //vector<int> path{ start };
-        vector<int> invalidated_prefixes;
-        //int idx = 1;
         cell c{ start, n, m };
-        int path_size = path.size();
-        //int path_shift = int(board[c.i][c.j] == pattern[0]);
 
         auto const& ProcessNeighbor = [this, &node, start, &idx, &path, &c](const char s, const cell& cell_n)
         {
@@ -177,11 +226,14 @@ struct SuffixesFinder
                 && !contains(path, n_index)
                 )
             {
-                if (node.parent && !has_valid_path(*node.parent, { start }, neighbor_idx))
+                if (node.parent)
                 {
-                    return false;
+                    if (!has_valid_path(*node.parent, { start }, n_index))
+                    {
+                        return false;
+                    }
+                    invalidate_paths(*node.parent, { start }, n_index);
                 }
-
                 visited[c.get_index() * visited_width + neighbor_idx] = true;
                 path.push_back(n_index);
                 c = cell_n;
@@ -194,9 +246,9 @@ struct SuffixesFinder
 
         do
         {
-            if (path.size() == pattern.size() - cached_idx)
+            if (path.size() - path_size == pattern.size() - cached_idx)
             {
-                node.paths.AddPath(path, invalidated_prefixes);
+                node.paths.AddPath(path);
                 if (bFindFirst)
                 {
                     return true;
@@ -224,69 +276,89 @@ struct SuffixesFinder
             {
                 continue;
             }
-            idx--;
-            assert(path.size() > 0);
 
-            for (auto& inv_path : invalidated_prefixes)
+            assert(path.size() > 0);
+            if (node.parent)
             {
-                if (inv_path == path.back())
-                {
-                    inv_path = -1;
-                }
+                validate_paths(*node.parent, { start }, path.back());
             }
             path.pop_back();
             if (path.empty())
             {
-                if (!node.paths.paths.empty())
-                {
-                    cout << "FOUND PATHS IN CYCLE" << endl;
-                }
                 return !node.paths.paths.empty();
             }
 
-            memset(visited + c.get_index(), false, 4);
+            idx--;
+            memset(visited + c.get_index() * visited_width, false, 4);
             c = cell{ path.back(), n, m };
         } while (!path.empty());
 
-        if (!node.paths.paths.empty())
-        {
-            cout << "FOUND PATHS OUT CYCLE" << endl;
-        }
         return !node.paths.paths.empty();
     }
 
     bool search(Node& node, const string& pattern, bool bFindFirst)
     {
+        bool Found = false;
         if (!node.parent)
         {
             vector<int>& root_symbols = symbol_table[pattern.front() - 'a'];
             vector<int> path;
             path.reserve(pattern.size());
-            for (const auto& root_symbol : root_symbols)
+            if (bFindFirst)
             {
-                path.push_back(root_symbol);
-                if (search_impl(node, path, root_symbol, 1, pattern, bFindFirst))
+                for (const auto& root_symbol : root_symbols)
                 {
-                    return true;
+                    path.push_back(root_symbol);
+                    if (search_impl(node, path, root_symbol, 1, pattern, bFindFirst))
+                    {
+                        return true;
+                    }
+                    path.clear();
                 }
-                path.clear();
+            }
+            else
+            {
+                for (const auto& root_symbol : root_symbols)
+                {
+                    path.push_back(root_symbol);
+                    if (search_impl(node, path, root_symbol, 1, pattern, bFindFirst))
+                    {
+                        Found = true;
+                    }
+                    path.clear();
+                }
             }
         }
         else
         {
             vector<int> path;
             path.reserve(pattern.size()+1);
-            for (auto& pair : node.parent->paths.paths)
+            if (bFindFirst)
             {
-                path.push_back(pair.first);
-                if (search_impl(node, path, pair.first, 0, pattern, bFindFirst))
+                for (auto& pair : node.parent->paths.paths)
                 {
-                    return true;
+                    path.push_back(pair.first);
+                    if (search_impl(node, path, pair.first, 0, pattern, bFindFirst))
+                    {
+                        return true;
+                    }
+                    path.clear();
                 }
-                path.clear();
+            }
+            else
+            {
+                for (auto& pair : node.parent->paths.paths)
+                {
+                    path.push_back(pair.first);
+                    if (search_impl(node, path, pair.first, 0, pattern, bFindFirst))
+                    {
+                        Found = true;
+                    }
+                    path.clear();
+                }
             }
         }
-        return false;
+        return Found;
   }
 
     void RootDFS(SuffixTree& Tree)
@@ -354,8 +426,35 @@ int main()
          {'i','h','k','r'},
          {'i','f','l','v'}
      };
+     std::vector<std::string> words{ "oath", "pea", "eat", "rain", "oathi", "oathk", "oathf", "oate", "oathii", "oathfi", "oathfii" };
+     //std::vector<std::string> words { "oath","pea","eat","rain","hklf", "hf" };
 
-     std::vector<std::string> words { "oath","pea","eat","rain","hklf", "hf" };
+    
+    //std::vector<std::vector<char>> board{
+    //    {'a', 'b'},
+    //    {'c', 'd'}
+    //};
+    //std::vector<std::string> words{ "abcb" };
+
+    //std::vector<std::vector<char>> board{
+    //   {'a'}
+    //};
+    //std::vector<std::string> words{ "a" };
+    
+    //std::vector<std::vector<char>> board {
+    //    {'o', 'a', 'b', 'n'},
+    //    {'o', 't', 'a', 'e'},
+    //    {'a', 'h', 'k', 'r'},
+    //    {'a', 'f', 'l', 'v'}
+    //};
+    //std::vector<std::string> words{ "oa", "oaa" };
+
+    //std::vector<std::vector<char>> board{
+    //    {'a', 'b', 'c'},
+    //    {'a', 'e', 'd'},
+    //    {'a', 'f', 'g'}
+    //};
+    //std::vector<std::string> words{ "abcdefg","ade" };
     // std::vector<std::vector<char>> board
     // {
     //     {'a','a'}
@@ -416,20 +515,17 @@ int main()
     //std::vector<std::string> words{ "aaaaaaaaaa","aaaaaaaaab","aaaaaaaaac","aaaaaaaaad","aaaaaaaaae","aaaaaaaaaf","aaaaaaaaag","aaaaaaaaah","aaaaaaaaai","aaaaaaaaaj","aaaaaaaaak","aaaaaaaaal","aaaaaaaaam","aaaaaaaaan","aaaaaaaaao","aaaaaaaaap","aaaaaaaaaq","aaaaaaaaar","aaaaaaaaas","aaaaaaaaat","aaaaaaaaau","aaaaaaaaav","aaaaaaaaaw","aaaaaaaaax","aaaaaaaaay","aaaaaaaaaz","aaaaaaaaba","aaaaaaaabb","aaaaaaaabc","aaaaaaaabd","aaaaaaaabe","aaaaaaaabf","aaaaaaaabg","aaaaaaaabh","aaaaaaaabi","aaaaaaaabj","aaaaaaaabk","aaaaaaaabl","aaaaaaaabm",
     //"aaaaaaaabn","aaaaaaaabo","aaaaaaaabp","aaaaaaaabq","aaaaaaaabr","aaaaaaaabs","aaaaaaaabt","aaaaaaaabu","aaaaaaaabv","aaaaaaaabw","aaaaaaaabx","aaaaaaaaby","aaaaaaaabz","aaaaaaaaca","aaaaaaaacb","aaaaaaaacc","aaaaaaaacd","aaaaaaaace","aaaaaaaacf","aaaaaaaacg","aaaaaaaach","aaaaaaaaci","aaaaaaaacj","aaaaaaaack","aaaaaaaacl","aaaaaaaacm","aaaaaaaacn","aaaaaaaaco","aaaaaaaacp","aaaaaaaacq","aaaaaaaacr","aaaaaaaacs","aaaaaaaact","aaaaaaaacu","aaaaaaaacv","aaaaaaaacw","aaaaaaaacx","aaaaaaaacy","aaaaaaaacz","aaaaaaaada","aaaaaaaadb","aaaaaaaadc","aaaaaaaadd","aaaaaaaade","aaaaaaaadf","aaaaaaaadg","aaaaaaaadh","aaaaaaaadi","aaaaaaaadj","aaaaaaaadk","aaaaaaaadl","aaaaaaaadm","aaaaaaaadn","aaaaaaaado","aaaaaaaadp","aaaaaaaadq","aaaaaaaadr","aaaaaaaads","aaaaaaaadt","aaaaaaaadu","aaaaaaaadv","aaaaaaaadw","aaaaaaaadx","aaaaaaaady","aaaaaaaadz","aaaaaaaaea","aaaaaaaaeb","aaaaaaaaec","aaaaaaaaed","aaaaaaaaee","aaaaaaaaef","aaaaaaaaeg","aaaaaaaaeh","aaaaaaaaei","aaaaaaaaej","aaaaaaaaek","aaaaaaaael","aaaaaaaaem","aaaaaaaaen","aaaaaaaaeo","aaaaaaaaep","aaaaaaaaeq","aaaaaaaaer","aaaaaaaaes","aaaaaaaaet","aaaaaaaaeu","aaaaaaaaev","aaaaaaaaew","aaaaaaaaex","aaaaaaaaey","aaaaaaaaez","aaaaaaaafa","aaaaaaaafb","aaaaaaaafc","aaaaaaaafd","aaaaaaaafe","aaaaaaaaff","aaaaaaaafg","aaaaaaaafh","aaaaaaaafi","aaaaaaaafj","aaaaaaaafk","aaaaaaaafl","aaaaaaaafm","aaaaaaaafn","aaaaaaaafo","aaaaaaaafp","aaaaaaaafq","aaaaaaaafr","aaaaaaaafs","aaaaaaaaft","aaaaaaaafu","aaaaaaaafv","aaaaaaaafw","aaaaaaaafx","aaaaaaaafy","aaaaaaaafz","aaaaaaaaga","aaaaaaaagb","aaaaaaaagc","aaaaaaaagd","aaaaaaaage","aaaaaaaagf","aaaaaaaagg","aaaaaaaagh","aaaaaaaagi","aaaaaaaagj","aaaaaaaagk","aaaaaaaagl","aaaaaaaagm","aaaaaaaagn","aaaaaaaago","aaaaaaaagp","aaaaaaaagq","aaaaaaaagr","aaaaaaaags","aaaaaaaagt","aaaaaaaagu","aaaaaaaagv","aaaaaaaagw","aaaaaaaagx","aaaaaaaagy","aaaaaaaagz","aaaaaaaaha","aaaaaaaahb","aaaaaaaahc","aaaaaaaahd","aaaaaaaahe","aaaaaaaahf","aaaaaaaahg","aaaaaaaahh","aaaaaaaahi","aaaaaaaahj","aaaaaaaahk","aaaaaaaahl","aaaaaaaahm","aaaaaaaahn","aaaaaaaaho","aaaaaaaahp","aaaaaaaahq",
     //"aaaaaaaahr","aaaaaaaahs","aaaaaaaaht","aaaaaaaahu","aaaaaaaahv","aaaaaaaahw","aaaaaaaahx","aaaaaaaahy","aaaaaaaahz","aaaaaaaaia","aaaaaaaaib","aaaaaaaaic","aaaaaaaaid","aaaaaaaaie","aaaaaaaaif","aaaaaaaaig","aaaaaaaaih","aaaaaaaaii","aaaaaaaaij","aaaaaaaaik","aaaaaaaail","aaaaaaaaim","aaaaaaaain","aaaaaaaaio","aaaaaaaaip","aaaaaaaaiq","aaaaaaaair","aaaaaaaais","aaaaaaaait","aaaaaaaaiu","aaaaaaaaiv","aaaaaaaaiw","aaaaaaaaix","aaaaaaaaiy","aaaaaaaaiz","aaaaaaaaja","aaaaaaaajb","aaaaaaaajc","aaaaaaaajd","aaaaaaaaje","aaaaaaaajf","aaaaaaaajg","aaaaaaaajh","aaaaaaaaji","aaaaaaaajj","aaaaaaaajk","aaaaaaaajl","aaaaaaaajm","aaaaaaaajn","aaaaaaaajo","aaaaaaaajp","aaaaaaaajq","aaaaaaaajr","aaaaaaaajs","aaaaaaaajt","aaaaaaaaju","aaaaaaaajv","aaaaaaaajw","aaaaaaaajx","aaaaaaaajy","aaaaaaaajz","aaaaaaaaka","aaaaaaaakb","aaaaaaaakc","aaaaaaaakd","aaaaaaaake","aaaaaaaakf","aaaaaaaakg","aaaaaaaakh","aaaaaaaaki","aaaaaaaakj","aaaaaaaakk","aaaaaaaakl","aaaaaaaakm","aaaaaaaakn","aaaaaaaako","aaaaaaaakp","aaaaaaaakq","aaaaaaaakr","aaaaaaaaks","aaaaaaaakt","aaaaaaaaku","aaaaaaaakv","aaaaaaaakw","aaaaaaaakx","aaaaaaaaky","aaaaaaaakz","aaaaaaaala","aaaaaaaalb","aaaaaaaalc","aaaaaaaald","aaaaaaaale","aaaaaaaalf","aaaaaaaalg","aaaaaaaalh","aaaaaaaali","aaaaaaaalj","aaaaaaaalk","aaaaaaaall","aaaaaaaalm","aaaaaaaaln","aaaaaaaalo","aaaaaaaalp","aaaaaaaalq","aaaaaaaalr","aaaaaaaals","aaaaaaaalt","aaaaaaaalu","aaaaaaaalv","aaaaaaaalw","aaaaaaaalx","aaaaaaaaly","aaaaaaaalz","aaaaaaaama","aaaaaaaamb","aaaaaaaamc",
-        //"aaaaaaaamd","aaaaaaaame","aaaaaaaamf","aaaaaaaamg","aaaaaaaamh","aaaaaaaami","aaaaaaaamj","aaaaaaaamk","aaaaaaaaml","aaaaaaaamm","aaaaaaaamn","aaaaaaaamo","aaaaaaaamp","aaaaaaaamq","aaaaaaaamr","aaaaaaaams","aaaaaaaamt","aaaaaaaamu","aaaaaaaamv","aaaaaaaamw","aaaaaaaamx","aaaaaaaamy","aaaaaaaamz","aaaaaaaana","aaaaaaaanb","aaaaaaaanc","aaaaaaaand","aaaaaaaane","aaaaaaaanf","aaaaaaaang","aaaaaaaanh","aaaaaaaani","aaaaaaaanj","aaaaaaaank","aaaaaaaanl","aaaaaaaanm","aaaaaaaann","aaaaaaaano","aaaaaaaanp","aaaaaaaanq","aaaaaaaanr","aaaaaaaans","aaaaaaaant","aaaaaaaanu","aaaaaaaanv","aaaaaaaanw","aaaaaaaanx","aaaaaaaany","aaaaaaaanz","aaaaaaaaoa","aaaaaaaaob","aaaaaaaaoc","aaaaaaaaod","aaaaaaaaoe","aaaaaaaaof","aaaaaaaaog","aaaaaaaaoh","aaaaaaaaoi","aaaaaaaaoj","aaaaaaaaok","aaaaaaaaol","aaaaaaaaom","aaaaaaaaon","aaaaaaaaoo","aaaaaaaaop","aaaaaaaaoq","aaaaaaaaor","aaaaaaaaos","aaaaaaaaot","aaaaaaaaou","aaaaaaaaov","aaaaaaaaow","aaaaaaaaox","aaaaaaaaoy","aaaaaaaaoz","aaaaaaaapa","aaaaaaaapb","aaaaaaaapc","aaaaaaaapd","aaaaaaaape","aaaaaaaapf","aaaaaaaapg","aaaaaaaaph","aaaaaaaapi","aaaaaaaapj","aaaaaaaapk","aaaaaaaapl","aaaaaaaapm","aaaaaaaapn","aaaaaaaapo","aaaaaaaapp","aaaaaaaapq","aaaaaaaapr","aaaaaaaaps","aaaaaaaapt","aaaaaaaapu","aaaaaaaapv","aaaaaaaapw","aaaaaaaapx","aaaaaaaapy","aaaaaaaapz","aaaaaaaaqa","aaaaaaaaqb","aaaaaaaaqc","aaaaaaaaqd","aaaaaaaaqe","aaaaaaaaqf","aaaaaaaaqg","aaaaaaaaqh","aaaaaaaaqi","aaaaaaaaqj","aaaaaaaaqk","aaaaaaaaql","aaaaaaaaqm","aaaaaaaaqn","aaaaaaaaqo","aaaaaaaaqp","aaaaaaaaqq","aaaaaaaaqr","aaaaaaaaqs","aaaaaaaaqt","aaaaaaaaqu","aaaaaaaaqv","aaaaaaaaqw","aaaaaaaaqx","aaaaaaaaqy","aaaaaaaaqz","aaaaaaaara","aaaaaaaarb","aaaaaaaarc","aaaaaaaard","aaaaaaaare","aaaaaaaarf","aaaaaaaarg","aaaaaaaarh","aaaaaaaari","aaaaaaaarj","aaaaaaaark","aaaaaaaarl","aaaaaaaarm","aaaaaaaarn","aaaaaaaaro","aaaaaaaarp","aaaaaaaarq","aaaaaaaarr","aaaaaaaars","aaaaaaaart","aaaaaaaaru","aaaaaaaarv","aaaaaaaarw","aaaaaaaarx","aaaaaaaary","aaaaaaaarz","aaaaaaaasa","aaaaaaaasb","aaaaaaaasc","aaaaaaaasd","aaaaaaaase","aaaaaaaasf","aaaaaaaasg","aaaaaaaash","aaaaaaaasi","aaaaaaaasj","aaaaaaaask","aaaaaaaasl","aaaaaaaasm","aaaaaaaasn","aaaaaaaaso","aaaaaaaasp","aaaaaaaasq","aaaaaaaasr","aaaaaaaass","aaaaaaaast","aaaaaaaasu","aaaaaaaasv","aaaaaaaasw","aaaaaaaasx","aaaaaaaasy","aaaaaaaasz","aaaaaaaata","aaaaaaaatb","aaaaaaaatc","aaaaaaaatd","aaaaaaaate","aaaaaaaatf","aaaaaaaatg","aaaaaaaath","aaaaaaaati","aaaaaaaatj","aaaaaaaatk","aaaaaaaatl","aaaaaaaatm","aaaaaaaatn","aaaaaaaato","aaaaaaaatp","aaaaaaaatq","aaaaaaaatr","aaaaaaaats","aaaaaaaatt","aaaaaaaatu","aaaaaaaatv","aaaaaaaatw","aaaaaaaatx","aaaaaaaaty","aaaaaaaatz","aaaaaaaaua","aaaaaaaaub","aaaaaaaauc","aaaaaaaaud","aaaaaaaaue","aaaaaaaauf","aaaaaaaaug","aaaaaaaauh","aaaaaaaaui","aaaaaaaauj","aaaaaaaauk","aaaaaaaaul","aaaaaaaaum","aaaaaaaaun","aaaaaaaauo","aaaaaaaaup","aaaaaaaauq","aaaaaaaaur","aaaaaaaaus","aaaaaaaaut","aaaaaaaauu","aaaaaaaauv","aaaaaaaauw","aaaaaaaaux","aaaaaaaauy","aaaaaaaauz","aaaaaaaava","aaaaaaaavb","aaaaaaaavc","aaaaaaaavd","aaaaaaaave","aaaaaaaavf","aaaaaaaavg","aaaaaaaavh","aaaaaaaavi","aaaaaaaavj","aaaaaaaavk","aaaaaaaavl","aaaaaaaavm","aaaaaaaavn","aaaaaaaavo","aaaaaaaavp","aaaaaaaavq","aaaaaaaavr","aaaaaaaavs","aaaaaaaavt","aaaaaaaavu","aaaaaaaavv","aaaaaaaavw","aaaaaaaavx","aaaaaaaavy","aaaaaaaavz","aaaaaaaawa","aaaaaaaawb","aaaaaaaawc","aaaaaaaawd","aaaaaaaawe","aaaaaaaawf","aaaaaaaawg","aaaaaaaawh","aaaaaaaawi","aaaaaaaawj","aaaaaaaawk","aaaaaaaawl","aaaaaaaawm","aaaaaaaawn","aaaaaaaawo","aaaaaaaawp","aaaaaaaawq","aaaaaaaawr","aaaaaaaaws","aaaaaaaawt","aaaaaaaawu","aaaaaaaawv","aaaaaaaaww","aaaaaaaawx","aaaaaaaawy","aaaaaaaawz","aaaaaaaaxa","aaaaaaaaxb","aaaaaaaaxc","aaaaaaaaxd","aaaaaaaaxe","aaaaaaaaxf","aaaaaaaaxg","aaaaaaaaxh","aaaaaaaaxi","aaaaaaaaxj","aaaaaaaaxk","aaaaaaaaxl","aaaaaaaaxm","aaaaaaaaxn","aaaaaaaaxo","aaaaaaaaxp","aaaaaaaaxq","aaaaaaaaxr","aaaaaaaaxs","aaaaaaaaxt","aaaaaaaaxu","aaaaaaaaxv","aaaaaaaaxw","aaaaaaaaxx","aaaaaaaaxy","aaaaaaaaxz","aaaaaaaaya","aaaaaaaayb","aaaaaaaayc","aaaaaaaayd","aaaaaaaaye","aaaaaaaayf","aaaaaaaayg","aaaaaaaayh","aaaaaaaayi","aaaaaaaayj","aaaaaaaayk","aaaaaaaayl","aaaaaaaaym","aaaaaaaayn","aaaaaaaayo","aaaaaaaayp","aaaaaaaayq","aaaaaaaayr","aaaaaaaays","aaaaaaaayt","aaaaaaaayu","aaaaaaaayv","aaaaaaaayw","aaaaaaaayx","aaaaaaaayy","aaaaaaaayz","aaaaaaaaza","aaaaaaaazb","aaaaaaaazc","aaaaaaaazd","aaaaaaaaze","aaaaaaaazf","aaaaaaaazg","aaaaaaaazh","aaaaaaaazi","aaaaaaaazj","aaaaaaaazk","aaaaaaaazl","aaaaaaaazm","aaaaaaaazn","aaaaaaaazo","aaaaaaaazp","aaaaaaaazq","aaaaaaaazr","aaaaaaaazs","aaaaaaaazt","aaaaaaaazu","aaaaaaaazv","aaaaaaaazw","aaaaaaaazx","aaaaaaaazy","aaaaaaaazz"
+    //    "aaaaaaaamd","aaaaaaaame","aaaaaaaamf","aaaaaaaamg","aaaaaaaamh","aaaaaaaami","aaaaaaaamj","aaaaaaaamk","aaaaaaaaml","aaaaaaaamm","aaaaaaaamn","aaaaaaaamo","aaaaaaaamp","aaaaaaaamq","aaaaaaaamr","aaaaaaaams","aaaaaaaamt","aaaaaaaamu","aaaaaaaamv","aaaaaaaamw","aaaaaaaamx","aaaaaaaamy","aaaaaaaamz","aaaaaaaana","aaaaaaaanb","aaaaaaaanc","aaaaaaaand","aaaaaaaane","aaaaaaaanf","aaaaaaaang","aaaaaaaanh","aaaaaaaani","aaaaaaaanj","aaaaaaaank","aaaaaaaanl","aaaaaaaanm","aaaaaaaann","aaaaaaaano","aaaaaaaanp","aaaaaaaanq","aaaaaaaanr","aaaaaaaans","aaaaaaaant","aaaaaaaanu","aaaaaaaanv","aaaaaaaanw","aaaaaaaanx","aaaaaaaany","aaaaaaaanz","aaaaaaaaoa","aaaaaaaaob","aaaaaaaaoc","aaaaaaaaod","aaaaaaaaoe","aaaaaaaaof","aaaaaaaaog","aaaaaaaaoh","aaaaaaaaoi","aaaaaaaaoj","aaaaaaaaok","aaaaaaaaol","aaaaaaaaom","aaaaaaaaon","aaaaaaaaoo","aaaaaaaaop","aaaaaaaaoq","aaaaaaaaor","aaaaaaaaos","aaaaaaaaot","aaaaaaaaou","aaaaaaaaov","aaaaaaaaow","aaaaaaaaox","aaaaaaaaoy","aaaaaaaaoz","aaaaaaaapa","aaaaaaaapb","aaaaaaaapc","aaaaaaaapd","aaaaaaaape","aaaaaaaapf","aaaaaaaapg","aaaaaaaaph","aaaaaaaapi","aaaaaaaapj","aaaaaaaapk","aaaaaaaapl","aaaaaaaapm","aaaaaaaapn","aaaaaaaapo","aaaaaaaapp","aaaaaaaapq","aaaaaaaapr","aaaaaaaaps","aaaaaaaapt","aaaaaaaapu","aaaaaaaapv","aaaaaaaapw","aaaaaaaapx","aaaaaaaapy","aaaaaaaapz","aaaaaaaaqa","aaaaaaaaqb","aaaaaaaaqc","aaaaaaaaqd","aaaaaaaaqe","aaaaaaaaqf","aaaaaaaaqg","aaaaaaaaqh","aaaaaaaaqi","aaaaaaaaqj","aaaaaaaaqk","aaaaaaaaql","aaaaaaaaqm","aaaaaaaaqn","aaaaaaaaqo","aaaaaaaaqp","aaaaaaaaqq","aaaaaaaaqr","aaaaaaaaqs","aaaaaaaaqt","aaaaaaaaqu","aaaaaaaaqv","aaaaaaaaqw","aaaaaaaaqx","aaaaaaaaqy","aaaaaaaaqz","aaaaaaaara","aaaaaaaarb","aaaaaaaarc","aaaaaaaard","aaaaaaaare","aaaaaaaarf","aaaaaaaarg","aaaaaaaarh","aaaaaaaari","aaaaaaaarj","aaaaaaaark","aaaaaaaarl","aaaaaaaarm","aaaaaaaarn","aaaaaaaaro","aaaaaaaarp","aaaaaaaarq","aaaaaaaarr","aaaaaaaars","aaaaaaaart","aaaaaaaaru","aaaaaaaarv","aaaaaaaarw","aaaaaaaarx","aaaaaaaary","aaaaaaaarz","aaaaaaaasa","aaaaaaaasb","aaaaaaaasc","aaaaaaaasd","aaaaaaaase","aaaaaaaasf","aaaaaaaasg","aaaaaaaash","aaaaaaaasi","aaaaaaaasj","aaaaaaaask","aaaaaaaasl","aaaaaaaasm","aaaaaaaasn","aaaaaaaaso","aaaaaaaasp","aaaaaaaasq","aaaaaaaasr","aaaaaaaass","aaaaaaaast","aaaaaaaasu","aaaaaaaasv","aaaaaaaasw","aaaaaaaasx","aaaaaaaasy","aaaaaaaasz","aaaaaaaata","aaaaaaaatb","aaaaaaaatc","aaaaaaaatd","aaaaaaaate","aaaaaaaatf","aaaaaaaatg","aaaaaaaath","aaaaaaaati","aaaaaaaatj","aaaaaaaatk","aaaaaaaatl","aaaaaaaatm","aaaaaaaatn","aaaaaaaato","aaaaaaaatp","aaaaaaaatq","aaaaaaaatr","aaaaaaaats","aaaaaaaatt","aaaaaaaatu","aaaaaaaatv","aaaaaaaatw","aaaaaaaatx","aaaaaaaaty","aaaaaaaatz","aaaaaaaaua","aaaaaaaaub","aaaaaaaauc","aaaaaaaaud","aaaaaaaaue","aaaaaaaauf","aaaaaaaaug","aaaaaaaauh","aaaaaaaaui","aaaaaaaauj","aaaaaaaauk","aaaaaaaaul","aaaaaaaaum","aaaaaaaaun","aaaaaaaauo","aaaaaaaaup","aaaaaaaauq","aaaaaaaaur","aaaaaaaaus","aaaaaaaaut","aaaaaaaauu","aaaaaaaauv","aaaaaaaauw","aaaaaaaaux","aaaaaaaauy","aaaaaaaauz","aaaaaaaava","aaaaaaaavb","aaaaaaaavc","aaaaaaaavd","aaaaaaaave","aaaaaaaavf","aaaaaaaavg","aaaaaaaavh","aaaaaaaavi","aaaaaaaavj","aaaaaaaavk","aaaaaaaavl","aaaaaaaavm","aaaaaaaavn","aaaaaaaavo","aaaaaaaavp","aaaaaaaavq","aaaaaaaavr","aaaaaaaavs","aaaaaaaavt","aaaaaaaavu","aaaaaaaavv","aaaaaaaavw","aaaaaaaavx","aaaaaaaavy","aaaaaaaavz","aaaaaaaawa","aaaaaaaawb","aaaaaaaawc","aaaaaaaawd","aaaaaaaawe","aaaaaaaawf","aaaaaaaawg","aaaaaaaawh","aaaaaaaawi","aaaaaaaawj","aaaaaaaawk","aaaaaaaawl","aaaaaaaawm","aaaaaaaawn","aaaaaaaawo","aaaaaaaawp","aaaaaaaawq","aaaaaaaawr","aaaaaaaaws","aaaaaaaawt","aaaaaaaawu","aaaaaaaawv","aaaaaaaaww","aaaaaaaawx","aaaaaaaawy","aaaaaaaawz","aaaaaaaaxa","aaaaaaaaxb","aaaaaaaaxc","aaaaaaaaxd","aaaaaaaaxe","aaaaaaaaxf","aaaaaaaaxg","aaaaaaaaxh","aaaaaaaaxi","aaaaaaaaxj","aaaaaaaaxk","aaaaaaaaxl","aaaaaaaaxm","aaaaaaaaxn","aaaaaaaaxo","aaaaaaaaxp","aaaaaaaaxq","aaaaaaaaxr","aaaaaaaaxs","aaaaaaaaxt","aaaaaaaaxu","aaaaaaaaxv","aaaaaaaaxw","aaaaaaaaxx","aaaaaaaaxy","aaaaaaaaxz","aaaaaaaaya","aaaaaaaayb","aaaaaaaayc","aaaaaaaayd","aaaaaaaaye","aaaaaaaayf","aaaaaaaayg","aaaaaaaayh","aaaaaaaayi","aaaaaaaayj","aaaaaaaayk","aaaaaaaayl","aaaaaaaaym","aaaaaaaayn","aaaaaaaayo","aaaaaaaayp","aaaaaaaayq","aaaaaaaayr","aaaaaaaays","aaaaaaaayt","aaaaaaaayu","aaaaaaaayv","aaaaaaaayw","aaaaaaaayx","aaaaaaaayy","aaaaaaaayz","aaaaaaaaza","aaaaaaaazb","aaaaaaaazc","aaaaaaaazd","aaaaaaaaze","aaaaaaaazf","aaaaaaaazg","aaaaaaaazh","aaaaaaaazi","aaaaaaaazj","aaaaaaaazk","aaaaaaaazl","aaaaaaaazm","aaaaaaaazn","aaaaaaaazo","aaaaaaaazp","aaaaaaaazq","aaaaaaaazr","aaaaaaaazs","aaaaaaaazt","aaaaaaaazu","aaaaaaaazv","aaaaaaaazw","aaaaaaaazx","aaaaaaaazy","aaaaaaaazz"
     //};
-    // Node node;
-    // BuildNode({0}, "bcdeb", board, node);
-    // node.print(0);
-    // cout << node.c << endl;
-    //auto const& res = sol.findWords(board, words);
 
-    //vector<string> res;
-    SuffixTree T;
-    T.Build(words);
-    T.print();
-    vector<string> res;
-    FindWords(T, board, res);
+     vector<string> res;
+     {
+         ChronoProfiler Profile{ "build_new_nodes" };
+         SuffixTree T;
+         T.Build(words);
+         T.print();
+         FindWords(T, board, res);
+     }
     //SymbolsMapType SymbolsMap;
     //cout << " START:" << endl;
     //FindWords(SymbolsMap, T, board, words, res);
@@ -443,7 +539,7 @@ int main()
     {
         std::cout << "Not found" << '\n';
     }
-    //ChronoProfiler::printTime("build_new_nodes");
+    ChronoProfiler::printTime("build_new_nodes");
     //ChronoProfiler::printTime("find_existing_words");
     //ChronoProfiler::printTime("process_neighbor");
     //ChronoProfiler::printTime("find_words");
