@@ -53,15 +53,13 @@ inline bool contains(const vector<T>& container, const T& Val)
 struct cell
 {
     int index{-1};
-    int n{-1};
     char c{'0'};
     cell* neighbors[4] = { nullptr, nullptr, nullptr, nullptr };
     int neighbor{0};
 
     cell() {}
-    cell(int _index, int _n, char _c)
+    cell(int _index, char _c)
         : index(_index)
-        , n(_n)
         , c(_c)
     {}
 };
@@ -87,7 +85,7 @@ struct WordFinder
         {
             int j = idx % n;
             int i = (idx - j) / n;
-            grid[idx] = cell{ idx, n, board[i][j] };
+            grid[idx] = cell{ idx, board[i][j] };
             if (j > 0)
             {
                 grid[idx].neighbors[0] = &grid[idx - 1];
