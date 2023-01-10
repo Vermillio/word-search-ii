@@ -85,7 +85,7 @@ struct Node
 					return this;
 				}
 				int new_prefix{ prefix_idx + index };
-				const auto& c = children[word[new_prefix] - 'a'];
+				const auto& c = children[word[new_prefix] - 97];
 				if (c)
 				{
 					Node* node = c->Insert(word);
@@ -95,7 +95,7 @@ struct Node
 				Node* node = new Node{ word, new_prefix, {} };
 				assert(node->pattern.size() > prefix_idx);
 				node->parent = this;
-				children[word[new_prefix]-'a'] = node;
+				children[word[new_prefix]-97] = node;
 				++children_num;
 				return node;
 			}
@@ -107,14 +107,14 @@ struct Node
 			mask = 0;
 			split_node->parent = this;
 			split_node->children_num = children_num;
-			split_node->children[pattern[new_prefix] - 'a'] = split_node;
+			split_node->children[pattern[new_prefix] - 97] = split_node;
 			Node* out_node = this;
 			if (index < word_suffix.size())
 			{
 				out_node = new Node{ string_view{ word.data(), word.size()}, new_prefix, { } };
 				assert(out_node->pattern.size() > out_node->prefix_idx);
 				out_node->parent = this;
-				split_node->children[word[new_prefix] - 'a'] = out_node;
+				split_node->children[word[new_prefix] - 97] = out_node;
 			}
 
 			pattern.remove_suffix(pattern_suffix.size() - index);
@@ -179,7 +179,7 @@ struct SuffixTree
 			}
 			const auto& word{ words[i] };
 
-			int idx = word[0] - 'a';
+			int idx = word[0] - 97;
 			if (!Roots[idx])
 			{
 				Roots[idx] = new Node{ word, 0, {} };

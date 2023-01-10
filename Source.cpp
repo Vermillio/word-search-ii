@@ -44,12 +44,6 @@ private:
     inline static std::unordered_map<std::string, long long> s_timers;
 };
 
-template<class T>
-inline bool contains(const vector<T>& container, const T& Val)
-{
-    return find(container.begin(), container.end(), Val) != container.end();
-}
-
 struct cell
 {
     int index{-1};
@@ -71,6 +65,9 @@ struct WordFinder
 
     cell* grid;
     int grid_size;
+
+    int path[11];
+    int path_index{ 0 };
 
     WordFinder(const vector<vector<char>>& in_board, vector<string>& words) :
         board(in_board),
@@ -268,9 +265,6 @@ struct WordFinder
         return !node.paths.paths.empty();
     }
 
-    int path[11];
-    int path_index{ 0 };
-
     bool search(Node& node)
     {
         bool bFindFirst = !node.children_num;
@@ -397,7 +391,7 @@ void FindWords(vector<string>& words, const vector<vector<char>>& board, vector<
         {
             for (auto& col : row)
             {
-                occ_table[col - 'a']++;
+                occ_table[col - 97]++;
             }
         }
         int occ[26];
@@ -412,7 +406,7 @@ void FindWords(vector<string>& words, const vector<vector<char>>& board, vector<
             }
             for (auto& c : word)
             {
-                if (--occ[c - 'a'] < 0)
+                if (--occ[c - 97] < 0)
                 {
                     mask[i] = 0;
                     break;
