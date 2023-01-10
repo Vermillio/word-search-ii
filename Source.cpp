@@ -117,7 +117,7 @@ struct WordFinder
             {
                 if (node.parent)
                 {
-                    bool found = has_valid_path(*node.parent, { path[0] }, idx);
+                    bool found = has_valid_path(*node.parent, path[0], idx);
                     if (found)
                     {
                         return true;
@@ -159,7 +159,7 @@ struct WordFinder
             }
             if (find(path.begin(), path.end(), idx) == path.end())
             {
-                if (bool res = has_valid_path(parent, { path[0] }, idx))
+                if (bool res = has_valid_path(parent, path[0], idx))
                 {
                     continue;
                 }
