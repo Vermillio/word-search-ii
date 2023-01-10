@@ -199,8 +199,6 @@ struct WordFinder
         int path_size = path_index;
         auto pattern{ node.get_pattern() };
 
-        cell* c{ &grid[start] };
-
         do
         {
             if (path_index - path_size == pattern.size() - cached_idx)
@@ -220,6 +218,7 @@ struct WordFinder
             }
             else
             {
+                cell* c = &grid[path[path_index - 1]];
                 const char p = pattern[idx];
                 bool found{ false };
                 for (int i = c->neighbor; i < 4; ++i)
@@ -254,20 +253,17 @@ struct WordFinder
                 {
                     continue;
                 }
+                else
+                {
+                    c->neighbor = 0;
+                }
             }
             if (node.parent)
             {
                 validate_paths(*node.parent, start, path[path_index - 1]);
             }
             --path_index;
-            if (path_index == 0)
-            {
-                return !node.paths.paths.empty();
-            }
-
             --idx;
-            c->neighbor = 0;
-            c = &grid[path[path_index - 1]];
         } while (path_index > 0);
         return !node.paths.paths.empty();
     }
