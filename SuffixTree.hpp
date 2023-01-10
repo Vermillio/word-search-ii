@@ -42,11 +42,11 @@ struct Node
 {
 	std::string_view pattern;
 	int prefix_idx;
-	bool bIsFinal = false;
 	Paths paths;
 	Node* parent{ nullptr };
 	Node* children[26];
 	int children_num{ 0 };
+	int mask{ 0 }; // 0 - not a word, 1 - forward, 2 - reversed, 3 - both reversed and forward
 
 	~Node()
 	{
@@ -67,7 +67,7 @@ struct Node
 		return res;
 	}
 
-	bool Insert(const std::string_view& word)
+	Node* Insert(const std::string_view& word)
 	{
 		string_view pattern_suffix{ get_pattern() };
 		string_view word_suffix{ word };
@@ -76,43 +76,45 @@ struct Node
 		{
 			if (index == 0)
 			{
-				return false;
+				return nullptr;
 			}
 			else if (index == pattern_suffix.size())
 			{
 				if (index == word_suffix.size())
 				{
-					bIsFinal = true;
-					return true;
-				}
-				for (const auto& c : children)
-				{
-					if (c && c->Insert(word))
-					{
-						return true;
-					}
+					return this;
 				}
 				int new_prefix{ prefix_idx + index };
-				Node* node = new Node{ word, new_prefix, true, {} };
+				const auto& c = children[word[new_prefix] - 'a'];
+				if (c)
+				{
+					Node* node = c->Insert(word);
+					assert(node);
+					return node;
+				}
+				Node* node = new Node{ word, new_prefix, {} };
 				assert(node->pattern.size() > prefix_idx);
 				node->parent = this;
 				children[word[new_prefix]-'a'] = node;
 				++children_num;
-				return true;
+				return node;
 			}
 
 			int new_prefix = prefix_idx + index;
-			Node* split_node = new Node{ pattern, new_prefix, bIsFinal, {}};
+			Node* split_node = new Node{ pattern, new_prefix, {}};
 			assert(split_node->pattern.size() > split_node->prefix_idx);
+			split_node->mask = mask;
+			mask = 0;
 			split_node->parent = this;
 			split_node->children_num = children_num;
 			split_node->children[pattern[new_prefix] - 'a'] = split_node;
+			Node* out_node = this;
 			if (index < word_suffix.size())
 			{
-				Node* subword_node = new Node{ string_view{ word.data(), word.size()}, new_prefix, true, { } };
-				assert(subword_node->pattern.size() > subword_node->prefix_idx);
-				subword_node->parent = this;
-				split_node->children[word[new_prefix] - 'a'] = subword_node;
+				out_node = new Node{ string_view{ word.data(), word.size()}, new_prefix, { } };
+				assert(out_node->pattern.size() > out_node->prefix_idx);
+				out_node->parent = this;
+				split_node->children[word[new_prefix] - 'a'] = out_node;
 			}
 
 			pattern.remove_suffix(pattern_suffix.size() - index);
@@ -127,10 +129,9 @@ struct Node
 			}
 			swap(split_node->children, children);
 			children_num = 2;
-			bIsFinal = index == word_suffix.size();
-			return true;
+			return out_node;
 		}
-		return false;
+		return nullptr;
 	}
 
 	void print(int indent)
@@ -139,7 +140,7 @@ struct Node
 		{
 			cout << "---";
 		}
-		cout << pattern << bIsFinal << endl;
+		cout << pattern << mask << endl;
 		for (auto& c : children)
 		{
 			if (c)
@@ -168,7 +169,7 @@ struct SuffixTree
 		}
 	}
 
-	void Build(const vector<string>& words, const vector<bool>& mask)
+	void Build(const vector<string>& words, const vector<int>& mask)
 	{
 		for (int i = 0; i < words.size(); ++i)
 		{
@@ -181,10 +182,16 @@ struct SuffixTree
 			int idx = word[0] - 'a';
 			if (!Roots[idx])
 			{
-				Roots[idx] = new Node{ word, 0, true, {} };
+				Roots[idx] = new Node{ word, 0, {} };
+				Roots[idx]->mask = mask[i];
 				continue;
 			}
-			Roots[idx]->Insert(word);
+			Node* node = Roots[idx]->Insert(word);
+			assert(node);
+			if (node->mask < 3)
+			{
+				node->mask += mask[i];
+			}
 		}
 	}
 
