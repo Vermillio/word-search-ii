@@ -191,111 +191,118 @@ struct WordFinder
         return true;
     }
 
-    bool search_impl(Node& node, vector<int>& path, int start, int idx, bool bFindFirst)
+    bool search_impl(Node& node, int start, int idx, bool bFindFirst)
     {
         for (int i = 0; i < grid_size; ++i)
         {
             grid[i].neighbor = 0;
         }
         int cached_idx = idx;
-        int path_size = (int)path.size();
+        int path_size = path_index;
         auto pattern{ node.get_pattern() };
 
         cell* c{ &grid[start] };
 
+        do
         {
-            do
+            if (path_index - path_size == pattern.size() - cached_idx)
             {
-                if (path.size() - path_size == pattern.size() - cached_idx)
+                auto& container = node.paths.paths[path[path_index - 1]];
+                container.paths.push_back({});
+                container.paths.back().reserve(path_index);
+                for (int i = 0; i < path_index; ++i)
                 {
-                    node.paths.AddPath(path);
-                    if (bFindFirst)
-                    {
-                        return true;
-                    }
+                    container.paths.back().push_back(path[i]);
                 }
-                else
+                container.valid_paths.push_back(-1);
+                if (bFindFirst)
                 {
-                    const char p = pattern[idx];
-                    bool found{ false };
-                    for (int i = c->neighbor; i < 4; ++i)
+                    return true;
+                }
+            }
+            else
+            {
+                const char p = pattern[idx];
+                bool found{ false };
+                for (int i = c->neighbor; i < 4; ++i)
+                {
+                    if (const auto & neighbor_cell_ptr{ c->neighbors[i] })
                     {
-                        if (const auto & neighbor_cell_ptr{ c->neighbors[i] })
+                        const auto& neighbor_cell{ *neighbor_cell_ptr };
+                        if (neighbor_cell.c == p
+                            && path[path_index - 1] != neighbor_cell.index
+                            && find(path, path + path_index, neighbor_cell.index) == path + path_index
+                            && process_neighbor(node, p, neighbor_cell))
                         {
-                            const auto& neighbor_cell{ *neighbor_cell_ptr };
-                            if (neighbor_cell.c == p
-                                && path.back() != neighbor_cell.index
-                                && !contains(path, neighbor_cell.index)
-                                && process_neighbor(node, p, neighbor_cell))
+                            if (node.parent)
                             {
-                                if (node.parent)
+                                if (!has_valid_path(*node.parent, start, neighbor_cell.index))
                                 {
-                                    if (!has_valid_path(*node.parent, start, neighbor_cell.index))
-                                    {
-                                        continue;
-                                    }
-                                    invalidate_paths(*node.parent, start, neighbor_cell.index);
+                                    continue;
                                 }
-                                found = true;
-                                c->neighbor = i + 1;
-                                path.push_back(neighbor_cell.index);
-                                c = neighbor_cell_ptr;
-                                idx++;
-                                break;
+                                invalidate_paths(*node.parent, start, neighbor_cell.index);
                             }
+                            found = true;
+                            c->neighbor = i + 1;
+                            path[path_index] = neighbor_cell.index;
+                            ++path_index;
+                            c = neighbor_cell_ptr;
+                            ++idx;
+                            break;
                         }
                     }
-                    if (found)
-                    {
-                        continue;
-                    }
                 }
-                if (node.parent)
+                if (found)
                 {
-                    validate_paths(*node.parent, start, path.back());
+                    continue;
                 }
-                path.pop_back();
-                if (path.empty())
-                {
-                    return !node.paths.paths.empty();
-                }
+            }
+            if (node.parent)
+            {
+                validate_paths(*node.parent, start, path[path_index - 1]);
+            }
+            --path_index;
+            if (path_index == 0)
+            {
+                return !node.paths.paths.empty();
+            }
 
-                idx--;
-                c->neighbor = 0;
-                c = &grid[path.back()];
-            } while (!path.empty());
-        }
+            --idx;
+            c->neighbor = 0;
+            c = &grid[path[path_index - 1]];
+        } while (path_index > 0);
         return !node.paths.paths.empty();
     }
+
+    int path[11];
+    int path_index{ 0 };
 
     bool search(Node& node)
     {
         bool bFindFirst = !node.children_num;
         bool Found = false;
-        vector<int> path;
-        path.reserve(node.pattern.size() + 1);
         if (bFindFirst)
         {
             for (auto& pair : node.parent->paths.paths)
             {
-                path.push_back(pair.first);
-                if (search_impl(node, path, pair.first, 0, bFindFirst))
+                path_index = 1;
+                path[0] = pair.first;
+                if (search_impl(node, pair.first, 0, bFindFirst))
                 {
                     return true;
                 }
-                path.clear();
             }
         }
         else
         {
             for (auto& pair : node.parent->paths.paths)
             {
-                path.push_back(pair.first);
-                if (search_impl(node, path, pair.first, 0, bFindFirst))
+                path_index = 1;
+                path[0] = pair.first;
+                if (search_impl(node, pair.first, 0, bFindFirst))
                 {
                     Found = true;
                 }
-                path.clear();
             }
         }
         return Found;
@@ -307,7 +314,7 @@ struct WordFinder
         bool res = search(Node);
         if (res && Node.mask)
         {
-            if (Node.mask >= 1)
+            if (Node.mask % 2 == 1)
             {
                 out_words.push_back(string{ Node.pattern });
             }
@@ -325,20 +332,18 @@ struct WordFinder
     {
         Node* RootsToSearch[26];
         memset(RootsToSearch, 0, 26 * sizeof(Node*));
-        vector<int> path;
         for (int i = 0; i < grid_size; ++i)
         {
-            if (Tree.Roots[grid[i].c - 'a'] != nullptr)
+            if (Tree.Roots[grid[i].c - 97] != nullptr)
             {
-                int RootIdx = grid[i].c - 'a';
+                int RootIdx = grid[i].c - 97;
                 auto& Root = Tree.Roots[RootIdx];
                 auto root_pattern{ Root->pattern };
-                path.reserve(root_pattern.size());
-                path.push_back(i);
-                if (search_impl(*Root, path, i, 1, Root->children_num == 0))
+                path_index = 1;
+                path[0] = i;
+                if (search_impl(*Root, i, 1, Root->children_num == 0))
                 {
                     RootsToSearch[RootIdx] = Tree.Roots[RootIdx];
-                    path.clear();
                 }
             }
         }
@@ -348,7 +353,7 @@ struct WordFinder
             {
                 continue;
             }
-            if (Root->mask >= 1)
+            if (Root->mask % 2 == 1)
             {
                 out_words.push_back(string{ Root->pattern.begin(), Root->pattern.end() });
             }
