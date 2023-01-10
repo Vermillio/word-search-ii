@@ -52,39 +52,18 @@ bool contains(const vector<T>& container, const T& Val)
 
 struct cell
 {
-    int i;
-    int j;
-    int n;
-    int m;
+    int index{-1};
+    int n{-1};
+    char c{'0'};
+    cell* neighbors[4] = { nullptr, nullptr, nullptr, nullptr };
+    int neighbor{0};
 
-    cell(int cell_index, int n_, int m_)
-        : n(n_)
-        , m(m_)
-    {
-        j = cell_index % n;
-        i = (cell_index - j) / n;
-    }
-
-    cell(int i_, int j_, int n_, int m_)
-        : i(i_),
-        j(j_),
-        n(n_),
-        m(m_)
-    {
-    }
-
-    int get_index() const
-    {
-        int index = i * n + j;
-        assert(i >= 0);
-        assert(j >= 0);
-        return index;
-    }
-
-    bool IsValid() const
-    {
-        return i >= 0 && i < m && j >= 0 && j < n;
-    }
+    cell() {}
+    cell(int _index, int _n, char _c)
+        : index(_index)
+        , n(_n)
+        , c(_c)
+    {}
 };
 
 using SymbolsMapType = vector<int>[30];
@@ -106,23 +85,47 @@ void BuildStartSymbolsMap(const vector<vector<char>>& board, SymbolsMapType& tab
     }
 }
 
-struct SuffixesFinder
+struct WordFinder
 {
     vector<string>& out_words;
     const vector<vector<char>>& board;
 
     SymbolsMapType symbol_table;
-    bool* visited;
-    int m;
-    int n;
-    constexpr static int visited_width = 4;
-    SuffixesFinder(const vector<vector<char>>& in_board, vector<string>& words) : board(in_board), out_words(words)
-    {
-        m = (int)board.size();
-        n = (int)board[0].size();
-        visited = new bool[m * n * visited_width];
-    }
+    cell* grid;
+    int grid_size;
 
+    WordFinder(const vector<vector<char>>& in_board, vector<string>& words) :
+        board(in_board),
+        out_words(words)
+    {
+        int m = (int)board.size();
+        int n = (int)board[0].size();
+        grid_size = (int)board.size() * (int)board[0].size();
+
+        grid = new cell[grid_size];
+        for (int idx = 0; idx < grid_size; ++idx)
+        {
+            int j = idx % n;
+            int i = (idx - j) / n;
+            grid[idx] = cell{ idx, n, board[i][j] };
+            if (j > 0)
+            {
+                grid[idx].neighbors[0] = &grid[idx - 1];
+            }
+            if (j < n - 1)
+            {
+                grid[idx].neighbors[1] = &grid[idx + 1];
+            }
+            if (i > 0)
+            {
+                grid[idx].neighbors[2] = &grid[idx - n];
+            }
+            if (i < m - 1)
+            {
+                grid[idx].neighbors[3] = &grid[idx + n];
+            }
+        }
+    }
 
     bool has_valid_path(const Node& node, const vector<int>& keys, int idx)
     {
@@ -203,35 +206,32 @@ struct SuffixesFinder
 
     bool search_impl(Node& node, vector<int>& path, int start, int idx, const string& pattern, bool bFindFirst)
     {
+        for (int i = 0; i < grid_size; ++i)
+        {
+            grid[i].neighbor = 0;
+        }
         int cached_idx = idx;
         int path_size = (int)path.size();
-        memset(visited, false, m * n * visited_width);
-        cell c{ start, n, m };
 
-        auto const& ProcessNeighbor = [this, &node, start, &idx, &path, &c](const char s, const cell& cell_n)
+        vector<cell*> cell_path;
+        cell* c{ &grid[start] };
+
+        auto const& ProcessNeighbor = [this, &cell_path, &node, start, &idx, &path, &c](const char s, const cell& cell_n)
         {
-            if (!cell_n.IsValid() || board[cell_n.i][cell_n.j] != s)
+            if (cell_n.c != s)
             {
                 return false;
             }
-            int neighbor_idx = (c.i - cell_n.i) + abs(c.i - cell_n.i) + (c.j - cell_n.j) + 2 * abs(c.j - cell_n.j);
-            if (int n_index = cell_n.get_index();
-                !visited[c.get_index() * visited_width + neighbor_idx]
-                && !contains(path, n_index)
-                )
+            if (!contains(path, cell_n.index))
             {
                 if (node.parent)
                 {
-                    if (!has_valid_path(*node.parent, { start }, n_index))
+                    if (!has_valid_path(*node.parent, { start }, cell_n.index))
                     {
                         return false;
                     }
-                    invalidate_paths(*node.parent, { start }, n_index);
+                    invalidate_paths(*node.parent, { start }, cell_n.index);
                 }
-                visited[c.get_index() * visited_width + neighbor_idx] = true;
-                path.push_back(n_index);
-                c = cell_n;
-                idx++;
                 return true;
 
             }
@@ -249,32 +249,34 @@ struct SuffixesFinder
                 }
             }
 
-            const auto& p = pattern[idx];
-            cell cell_n{ c.i - 1, c.j, n, m };
-            if (ProcessNeighbor(p, cell_n))
+            const char p = pattern[idx];
+            bool found{ false };
+            for (int i = c->neighbor; i < 4; ++i)
+            {
+                if (const auto& neighbor_cell{ c->neighbors[i] }; neighbor_cell && ProcessNeighbor(p, *neighbor_cell))
+                {
+                    found = true;
+                    c->neighbor = i+1;
+                    cell_path.push_back(c);
+                    path.push_back(neighbor_cell->index);
+                    c = neighbor_cell;
+                    idx++;
+                    break;
+                }
+            }
+            if (found)
             {
                 continue;
             }
-            cell_n = cell{ c.i + 1, c.j, n, m };
-            if (ProcessNeighbor(p, cell_n))
-            {
-                continue;
-            }
-            cell_n = cell{ c.i, c.j - 1, n, m };
-            if (ProcessNeighbor(p, cell_n))
-            {
-                continue;
-            }
-            cell_n = cell{ c.i, c.j + 1, n, m };
-            if (ProcessNeighbor(p, cell_n))
-            {
-                continue;
-            }
-
+            
             assert(path.size() > 0);
             if (node.parent)
             {
                 validate_paths(*node.parent, { start }, path.back());
+            }
+            if (!cell_path.empty())
+            {
+                cell_path.pop_back();
             }
             path.pop_back();
             if (path.empty())
@@ -283,8 +285,8 @@ struct SuffixesFinder
             }
 
             idx--;
-            memset(visited + c.get_index() * visited_width, false, 4);
-            c = cell{ path.back(), n, m };
+            c->neighbor = 0;
+            c = &grid[path.back()];
         } while (!path.empty());
 
         return !node.paths.paths.empty();
@@ -355,7 +357,7 @@ struct SuffixesFinder
         return Found;
   }
 
-    void RootDFS(SuffixTree& Tree)
+    void FindWords(SuffixTree& Tree)
     {
         BuildStartSymbolsMap(board, symbol_table);
         for (auto& Root : Tree.Roots)
@@ -406,8 +408,8 @@ struct SuffixesFinder
 
 void FindWords(SuffixTree& T, const vector<vector<char>>& board, vector<string>& out)
 {
-    SuffixesFinder SFinder{ board, out };
-    SFinder.RootDFS(T);
+    WordFinder Finder{ board, out };
+    Finder.FindWords(T);
 }
 
 int main()
@@ -430,7 +432,7 @@ int main()
     //std::vector<std::string> words{ "abcb" };
 
     //std::vector<std::vector<char>> board{
-    //   {'a'}
+    //   {'a', 'a'}
     //};
     //std::vector<std::string> words{ "a" };
     
@@ -447,7 +449,7 @@ int main()
     //    {'a', 'e', 'd'},
     //    {'a', 'f', 'g'}
     //};
-    //std::vector<std::string> words{ "abcdefg","ade" };
+    //std::vector<std::string> words{ "abcdefg","gfedcbaaa","eaabcdgfa","befa","dgc","ade" };
     // std::vector<std::vector<char>> board
     // {
     //     {'a','a'}
@@ -528,8 +530,5 @@ int main()
         std::cout << "Not found" << '\n';
     }
     ChronoProfiler::printTime("find_words");
-    //ChronoProfiler::printTime("find_existing_words");
-    //ChronoProfiler::printTime("process_neighbor");
-    //ChronoProfiler::printTime("find_words");
     return 0;
 }
