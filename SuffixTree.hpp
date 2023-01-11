@@ -35,11 +35,11 @@ struct Node
 {
 	std::string_view pattern;
 	int prefix_idx;
-	Paths paths;
 	Node* parent{ nullptr };
 	Node* children[26];
 	int children_num{ 0 };
 	int mask{ 0 }; // 0 - not a word, 1 - forward, 2 - reversed, 3 - both reversed and forward
+	Paths paths;
 
 	~Node()
 	{
@@ -157,37 +157,69 @@ struct SuffixTree
 	{
 		for (auto& Root : Roots)
 		{
-			delete Root;
-			Root = nullptr;
+			if (Root)
+			{
+				delete Root;
+				Root = nullptr;
+			}
 		}
 	}
 
-	void Build(const vector<string>& words, const vector<int>& mask)
+	void Build(vector<string>& words, const vector<vector<char>>& board)
 	{
+		int grid_size = board.size() * board[0].size();
+		int occ_table[26];
+		memset(occ_table, 0, 26 * sizeof(int));
+		for (auto& row : board)
+		{
+			for (auto& col : row)
+			{
+				++occ_table[col - 97];
+			}
+		}
+		int occ[26];
 		for (int i = 0; i < words.size(); ++i)
 		{
-			if (!mask[i])
+			auto& word{ words[i] };
+			copy(occ_table, occ_table + 26, occ);
+			if (word.size() > grid_size)
 			{
 				continue;
 			}
-			const auto& word{ words[i] };
+			int mask{ 1 };
+			for (auto& c : word)
+			{
+				if (--occ[c - 97] < 0)
+				{
+					mask = 0;
+					break;
+				}
+			}
+
+			if (mask == 0) continue;
+
+			int left = word.find_first_not_of(word[0]);
+			int right = word.size() - word.find_last_not_of(word[word.size() - 1]);
+			if (left > right)
+			{
+				reverse(begin(word), end(word));
+				mask = 2;
+			}
 
 			int idx = word[0] - 97;
 			if (!Roots[idx])
 			{
 				Roots[idx] = new Node{ word, 0, {} };
-				Roots[idx]->mask = mask[i];
+				Roots[idx]->mask = mask;
 				continue;
 			}
 			Node* node = Roots[idx]->Insert(word);
-			assert(node);
 			if (node->mask < 3)
 			{
-				node->mask += mask[i];
+				node->mask += mask;
 			}
 		}
 	}
-
 
 	void print()
 	{

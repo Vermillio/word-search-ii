@@ -56,7 +56,7 @@ struct cell
     {}
 };
 
-struct WordFinder
+struct DFSWordFinder
 {
     vector<string>& out_words;
     const vector<vector<char>>& board;
@@ -66,9 +66,9 @@ struct WordFinder
     uint8_t n;
 
     int path[11];
-    uint8_t path_index{ 0 };
+    int8_t path_index{ 0 };
 
-    WordFinder(const vector<vector<char>>& in_board, vector<string>& words) :
+    DFSWordFinder(const vector<vector<char>>& in_board, vector<string>& words) :
         board(in_board),
         out_words(words)
     {
@@ -105,132 +105,67 @@ struct WordFinder
         }
     }
 
-    bool has_valid_path(const Node& node, const int key, int idx)
-    {
-        const auto& paths = node.paths.paths.find(key)->second;
-        for (int i = 0; i < paths.size(); ++i)
-        {
-            const auto& path{ paths[i] };
-            if (path.valid != -1 || find(path.path.begin(), path.path.end(), idx) != path.path.end())
-            {
-                continue;
-            }
-            if (!node.parent)
-            {
-                return true;
-            }
-            if (has_valid_path(*node.parent, path.path[0], idx))
-            {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    void invalidate_paths(Node& node, const int key, int idx)
-    {
-        auto& paths = node.paths.paths.find(key)->second;
-        if (!node.parent)
-        {
-            for (int i = 0; i < paths.size(); ++i)
-            {
-                auto& path{ paths[i] };
-                if (path.valid != -1
-                    || find(path.path.begin(), path.path.end(), idx) == path.path.end())
-                {
-                    continue;
-                }
-                path.valid = idx;
-            }
-            return;
-        }
-        auto& parent{ *node.parent };
-        for (int i = 0; i < paths.size(); ++i)
-        {
-            auto& path{ paths[i] };
-            if (path.valid != -1)
-            {
-                continue;
-            }
-            if (find(path.path.begin(), path.path.end(), idx) == path.path.end())
-            {
-                if (bool res = has_valid_path(parent, path.path[0], idx))
-                {
-                    continue;
-                }
-            }
-            path.valid = idx;
-        }
-    }
-
-    void validate_paths(Node& node, const int key, int idx)
-    {
-        auto& paths = node.paths.paths.find(key)->second;
-        for (int i = 0; i < paths.size(); ++i)
-        {
-            auto& path{ paths[i] };
-            if (path.valid == idx)
-            {
-                path.valid = -1;
-            }
-        }
-    }
-
-    bool search_impl(Node& node, const int start, const int idx, const bool bFindFirst)
+    bool search_impl(Node& node, const int idx)
     {
         int path_index_cached = path_index;
-        grid[path[path_index - 1]].c = '$';
+        int start = path[path_index - 1];
         auto pattern{ node.get_pattern() };
         pattern.remove_prefix(idx);
 
         do
         {
-            if (path_index - path_index_cached == pattern.size())
+            if (path_index == node.pattern.size())
             {
-                if (bFindFirst)
+                if (node.mask == 1 || node.mask == 3)
                 {
-                    for (uint8_t i = 0; i < path_index; ++i)
+                    out_words.push_back(string{ node.pattern });
+                }
+                if (node.mask >= 2)
+                {
+                    out_words.push_back(string{ node.pattern });
+                    reverse(out_words.back().begin(), out_words.back().end());
+                }
+                node.mask = -1;
+
+                if (node.children_num)
+                {
+                    for (int i = 0; i < 26; ++i)
+                    {
+                        if (!node.children[i])
+                            continue;
+                        if (search_impl(*node.children[i], 0))
+                        {
+                            delete node.children[i];
+                            node.children[i] = nullptr;
+                            --node.children_num;
+                        }
+                    }
+                }
+                if (!node.children_num)
+                {
+                    for (uint8_t i = path_index_cached; i < path_index; ++i)
                     {
                         grid[path[i]].c = board[path[i] / n][path[i] % n];
                         grid[path[i]].neighbor = 0;
                     }
+                    grid[path[path_index_cached - 1]].neighbor = 0;
+                    path_index = path_index_cached;
                     return true;
-                }
-                else
-                {
-                    auto& container = node.paths.paths[path[path_index - 1]];
-                    container.push_back({});
-                    container.back().valid = -1;
-                    container.back().path.reserve(path_index);
-                    for (uint8_t i = 0; i < path_index; ++i)
-                    {
-                        container.back().path.push_back(path[i]);
-                    }
                 }
             }
             else
             {
                 cell* c = &grid[path[path_index - 1]];
-                const char p = pattern[path_index - path_index_cached];
+                const char p = node.pattern[path_index];
                 bool found{ false };
                 for (uint8_t i = c->neighbor; i < 4; ++i)
                 {
-                    if (auto & neighbor_cell_ptr{ c->neighbors[i] })
+                    if (auto neighbor_cell_ptr{ c->neighbors[i] })
                     {
                         auto& neighbor_cell{ *neighbor_cell_ptr };
                         const int neighbor_cell_index = neighbor_cell_ptr - grid;
                         if (neighbor_cell.c == p)
                         {
-                            if (node.parent)
-                            {
-                                {
-                                    if (!has_valid_path(*node.parent, start, neighbor_cell_index))
-                                    {
-                                        continue;
-                                    }
-                                    invalidate_paths(*node.parent, start, neighbor_cell_index);
-                                }
-                            }
                             found = true;
                             c->neighbor = i + 1;
                             path[path_index] = neighbor_cell_index;
@@ -250,182 +185,67 @@ struct WordFinder
                     c->neighbor = 0;
                 }
             }
-            if (node.parent)
-            {
-                validate_paths(*node.parent, start, path[path_index - 1]);
-            }
             --path_index;
-            grid[path[path_index]].c = board[path[path_index] / n][path[path_index] % n];
-        } while (path_index > 0);
-        return !node.paths.paths.empty();
-    }
-
-    bool search(Node& node)
-    {
-        bool bFindFirst = !node.children_num;
-        bool Found = false;
-        if (bFindFirst)
-        {
-            for (auto& pair : node.parent->paths.paths)
+            if (path_index >= path_index_cached)
             {
-                path_index = 1;
-                path[0] = pair.first;
-                if (search_impl(node, pair.first, 0, bFindFirst))
-                {
-                    return true;
-                }
+                grid[path[path_index]].c = board[path[path_index] / n][path[path_index] % n];
             }
-        }
-        else
-        {
-            for (auto& pair : node.parent->paths.paths)
-            {
-                path_index = 1;
-                path[0] = pair.first;
-                if (search_impl(node, pair.first, 0, bFindFirst))
-                {
-                    Found = true;
-                }
-            }
-        }
-        return Found;
-    }
-
-    bool SearchSuffixes(Node& Node)
-    {
-        vector<int> out_path;
-        bool res = search(Node);
-        if (res && Node.mask)
-        {
-            if (Node.mask % 2 == 1)
-            {
-                out_words.push_back(string{ Node.pattern });
-            }
-            if (Node.mask >= 2)
-            {
-                out_words.push_back(string{ Node.pattern });
-                reverse(out_words.back().begin(), out_words.back().end());
-            }
-            return true;
-        }
-        return true;
+        } while (path_index >= path_index_cached);
+        grid[path[path_index_cached - 1]].neighbor = 0;
+        path_index = path_index_cached;
+        return false;
     }
 
     void FindWords(SuffixTree& Tree)
     {
-        Node* RootsToSearch[26];
-        memset(RootsToSearch, 0, 26 * sizeof(Node*));
+        char cell_char;
         for (int i = 0; i < grid_size; ++i)
         {
-            if (Tree.Roots[grid[i].c - 97] != nullptr)
+            cell_char = grid[i].c;
+            if (auto& Root = Tree.Roots[cell_char - 97])
             {
-                int RootIdx = grid[i].c - 97;
-                auto& Root = Tree.Roots[RootIdx];
                 auto root_pattern{ Root->pattern };
                 path_index = 1;
                 path[0] = i;
-                if (search_impl(*Root, i, 1, Root->children_num == 0))
+                grid[i].c = '$';
+                if (search_impl(*Root, 1))
                 {
-                    RootsToSearch[RootIdx] = Tree.Roots[RootIdx];
+                    delete Root;
+                    Root = nullptr;
                 }
-            }
-        }
-        for (auto& Root : RootsToSearch)
-        {
-            if (!Root)
-            {
-                continue;
-            }
-            if (Root->mask % 2 == 1)
-            {
-                out_words.push_back(string{ Root->pattern.begin(), Root->pattern.end() });
-            }
-            if (Root->mask >= 2)
-            {
-                out_words.push_back(string{ Root->pattern.begin(), Root->pattern.end() });
-                reverse(out_words.back().begin(), out_words.back().end());
-            }
-            for (auto c : Root->children)
-            {
-                if (c)
-                {
-                    DFS(*c);
-                }
+                grid[i].c = cell_char;
             }
         }
         return;
     }
 
-    void DFS(Node& Node)
-    {
-        if (!SearchSuffixes(Node))
-        {
-            return;
-        }
-        for (auto& c : Node.children)
-        {
-            if (c)
-            {
-                DFS(*c);
-            }
-        }
-        return;
-    }
+    //void DFS(Node& Node)
+    //{
+    //    if (!SearchSuffixes(Node))
+    //    {
+    //        return;
+    //    }
+    //    for (auto& c : Node.children)
+    //    {
+    //        if (c)
+    //        {
+    //            DFS(*c);
+    //        }
+    //    }
+    //    return;
+    //}
 };
 
 void FindWords(vector<string>& words, const vector<vector<char>>& board, vector<string>& out)
 {
-    out.reserve(words.size());
-    vector<int> mask(words.size(), 1);
-    {
-        ChronoProfiler profiler("prune");
-        int grid_size = board.size() * board[0].size();
-        int occ_table[26];
-        memset(occ_table, 0, 26 * sizeof(int));
-        for (auto& row : board)
-        {
-            for (auto& col : row)
-            {
-                occ_table[col - 97]++;
-            }
-        }
-        int occ[26];
-        for (auto i{ 0 }; i < words.size(); ++i)
-        {
-            auto& word{ words[i] };
-            copy(occ_table, occ_table + 26, occ);
-            if (word.size() > grid_size)
-            {
-                mask[i] = 0;
-                continue;
-            }
-            for (auto& c : word)
-            {
-                if (--occ[c - 97] < 0)
-                {
-                    mask[i] = 0;
-                    break;
-                }
-            }
-
-            int left = word.find_first_not_of(word[0]);
-            int right = word.size() - word.find_last_not_of(word[word.size() - 1]);
-            if (left > right)
-            {
-                reverse(begin(word), end(word));
-                mask[i] = 2;
-            }
-        }
-
-    }
     SuffixTree T;
     {
-        ChronoProfiler profiler("build_tree");
-        T.Build(words, mask);
+        ChronoProfiler Profiler{ "build_tree" };
+        T.Build(words, board);
     }
     {
-        ChronoProfiler profiler("find_words");
-        WordFinder Finder{ board, out };
+        ChronoProfiler Profiler{ "find_words" };
+        DFSWordFinder Finder{ board, out };
         Finder.FindWords(T);
     }
 }
@@ -442,7 +262,7 @@ int main()
     //std::vector<std::string> words{ "oath", "pea", "eat", "rain", 
     //    //"oathi", "oathk", "oathf", "oate", "oathii", "oathfi", "oathfii"
     //};
-   // std::vector<std::string> words { "oath","pea","eat","rain","hklf", "hf" };
+    //std::vector<std::string> words { "oath","pea","eat","rain","hklf", "hf" };
 
 
    //std::vector<std::vector<char>> board{
@@ -483,21 +303,13 @@ int main()
     // };
 
     // std::vector<std::string> words { "aaa" };
-    // std::vector<std::vector<char>> board
-    // {
-    //     {'a','b','c'},
-    //     {'a','e','d'},
-    //     {'a','f','g'}
-    // };
-    // std::vector<std::string> words { "abcdefg","gfedcbaaa","eaabcdgfa","befa","dgc","ade" };
-    //std::vector<std::string> words {"eaafgdcba", "eaabcdgfa"};
 
-    // std::vector<std::vector<char>> board
-    // {
-    //     {'a','b','e'},
-    //     {'b','c','d'}
-    // };
-    // std::vector<std::string> words {"abcdeb"};
+     //std::vector<std::vector<char>> board
+     //{
+     //    {'a','b','e'},
+     //    {'b','c','d'}
+     //};
+     //std::vector<std::string> words {"abcdeb"};
 
     //{
         std::vector<std::vector<char>> board{ {'b','a','b','a','b','a','b','a','b','a'},
@@ -522,10 +334,10 @@ int main()
             "ababababoc","ababababod","ababababoe","ababababof","ababababog","ababababoh","ababababoi","ababababoj","ababababok","ababababol","ababababom","ababababon","ababababoo","ababababop","ababababoq","ababababor","ababababos","ababababot","ababababou","ababababov","ababababow","ababababox","ababababoy","ababababoz","ababababpa","ababababpb","ababababpc","ababababpd","ababababpe","ababababpf","ababababpg","ababababph","ababababpi","ababababpj","ababababpk","ababababpl","ababababpm","ababababpn","ababababpo","ababababpp","ababababpq","ababababpr","ababababps","ababababpt","ababababpu","ababababpv","ababababpw","ababababpx","ababababpy","ababababpz","ababababqa","ababababqb","ababababqc","ababababqd","ababababqe","ababababqf","ababababqg","ababababqh","ababababqi","ababababqj","ababababqk","ababababql","ababababqm","ababababqn","ababababqo","ababababqp","ababababqq","ababababqr","ababababqs","ababababqt","ababababqu","ababababqv","ababababqw","ababababqx","ababababqy","ababababqz","ababababra","ababababrb","ababababrc","ababababrd","ababababre","ababababrf","ababababrg","ababababrh","ababababri","ababababrj","ababababrk","ababababrl","ababababrm","ababababrn","ababababro","ababababrp","ababababrq","ababababrr","ababababrs","ababababrt","ababababru","ababababrv","ababababrw","ababababrx","ababababry","ababababrz","ababababsa","ababababsb","ababababsc","ababababsd","ababababse","ababababsf","ababababsg",
             "ababababsh","ababababsi","ababababsj","ababababsk","ababababsl","ababababsm","ababababsn","ababababso","ababababsp","ababababsq","ababababsr","ababababss","ababababst","ababababsu","ababababsv","ababababsw","ababababsx","ababababsy","ababababsz","ababababta","ababababtb","ababababtc","ababababtd","ababababte","ababababtf","ababababtg","ababababth","ababababti","ababababtj","ababababtk","ababababtl","ababababtm","ababababtn","ababababto","ababababtp","ababababtq","ababababtr","ababababts","ababababtt","ababababtu","ababababtv","ababababtw","ababababtx","ababababty","ababababtz","ababababua","ababababub","ababababuc","ababababud","ababababue","ababababuf","ababababug","ababababuh","ababababui","ababababuj","ababababuk","ababababul","ababababum","ababababun","ababababuo","ababababup","ababababuq","ababababur","ababababus","ababababut","ababababuu","ababababuv","ababababuw","ababababux","ababababuy","ababababuz","ababababva","ababababvb","ababababvc","ababababvd","ababababve","ababababvf","ababababvg","ababababvh","ababababvi","ababababvj","ababababvk","ababababvl","ababababvm","ababababvn","ababababvo","ababababvp","ababababvq","ababababvr","ababababvs","ababababvt","ababababvu","ababababvv","ababababvw","ababababvx","ababababvy","ababababvz","ababababwa","ababababwb","ababababwc","ababababwd","ababababwe","ababababwf","ababababwg","ababababwh","ababababwi","ababababwj","ababababwk","ababababwl","ababababwm","ababababwn","ababababwo","ababababwp","ababababwq","ababababwr","ababababws","ababababwt","ababababwu","ababababwv","ababababww","ababababwx","ababababwy","ababababwz","ababababxa","ababababxb","ababababxc","ababababxd","ababababxe","ababababxf","ababababxg","ababababxh","ababababxi","ababababxj","ababababxk","ababababxl","ababababxm","ababababxn","ababababxo","ababababxp","ababababxq","ababababxr","ababababxs","ababababxt","ababababxu","ababababxv","ababababxw","ababababxx","ababababxy","ababababxz","ababababya","ababababyb","ababababyc","ababababyd","ababababye","ababababyf","ababababyg","ababababyh","ababababyi","ababababyj","ababababyk","ababababyl","ababababym","ababababyn","ababababyo","ababababyp","ababababyq","ababababyr","ababababys","ababababyt","ababababyu","ababababyv","ababababyw","ababababyx","ababababyy","ababababyz","ababababza","ababababzb","ababababzc","ababababzd","ababababze","ababababzf","ababababzg","ababababzh","ababababzi","ababababzj","ababababzk","ababababzl","ababababzm","ababababzn","ababababzo","ababababzp","ababababzq","ababababzr","ababababzs","ababababzt","ababababzu","ababababzv","ababababzw","ababababzx","ababababzy","ababababzz"
         };
-    //    vector<string> res;
-    //    {
-    //        FindWords(words, board, res);
-    //    }
+        vector<string> res;
+        {
+            FindWords(words, board, res);
+        }
     //    cout << " RESULT:" << endl;
     //    for (auto const& res_word : res)
     //    {
