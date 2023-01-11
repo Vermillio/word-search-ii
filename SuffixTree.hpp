@@ -23,19 +23,12 @@ int intersection(const string_view& a, const string_view& b)
 
 struct Paths
 {
-	struct PrefixPaths
+	struct Path
 	{
-		vector<vector<int>> paths;
-		vector<int> valid_paths;
+		int valid;
+		vector<int> path;
 	};
-	unordered_map<int, PrefixPaths> paths;
-
-	void AddPath(const vector<int>& path)
-	{
-		auto& container = paths[path.back()];
-		container.paths.push_back(path);
-		container.valid_paths.push_back(-1);
-	}
+	unordered_map<int, vector<Path>> paths;
 };
 
 struct Node
@@ -140,7 +133,7 @@ struct Node
 		{
 			cout << "---";
 		}
-		cout << pattern << mask << endl;
+		cout << get_pattern() << endl;
 		for (auto& c : children)
 		{
 			if (c)
