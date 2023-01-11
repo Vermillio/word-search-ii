@@ -24,7 +24,7 @@ public:
     ~ChronoProfiler()
     {
         auto end = std::chrono::steady_clock::now();
-        auto elapsed_time = std::chrono::duration_cast<std::chrono::milliseconds>(end - m_start).count();
+        auto elapsed_time = std::chrono::duration_cast<std::chrono::nanoseconds>(end - m_start).count();
 
         // Add elapsed time to timer with the same name
         s_timers[m_name] += elapsed_time;
@@ -33,7 +33,7 @@ public:
     // Static function to print elapsed time for a specific timer
     static void printTime(const std::string& name)
     {
-        std::cout << name << " elapsed time: " << s_timers[name] << "ms" << std::endl;
+        std::cout << name << " elapsed time: " << s_timers[name] / 1000000 << "ms" << std::endl;
     }
 
 private:
@@ -176,26 +176,23 @@ struct WordFinder
         }
     }
 
-    bool search_impl(Node& node, int start, int idx, bool bFindFirst)
+    bool search_impl(Node& node, const int start, const int idx, const bool bFindFirst)
     {
-        for (int i = 0; i < grid_size; ++i)
-        {
-            grid[i].neighbor = 0;
-        }
-        int cached_idx = idx;
-        int path_size = path_index;
+        int path_index_cached = path_index;
         grid[path[path_index - 1]].c = '$';
         auto pattern{ node.get_pattern() };
+        pattern.remove_prefix(idx);
 
         do
         {
-            if (path_index - path_size == pattern.size() - cached_idx)
+            if (path_index - path_index_cached == pattern.size())
             {
                 if (bFindFirst)
                 {
                     for (uint8_t i = 0; i < path_index; ++i)
                     {
                         grid[path[i]].c = board[path[i] / n][path[i] % n];
+                        grid[path[i]].neighbor = 0;
                     }
                     return true;
                 }
@@ -214,7 +211,7 @@ struct WordFinder
             else
             {
                 cell* c = &grid[path[path_index - 1]];
-                const char p = pattern[idx];
+                const char p = pattern[path_index - path_index_cached];
                 bool found{ false };
                 for (uint8_t i = c->neighbor; i < 4; ++i)
                 {
@@ -226,11 +223,13 @@ struct WordFinder
                         {
                             if (node.parent)
                             {
-                                if (!has_valid_path(*node.parent, start, neighbor_cell_index))
                                 {
-                                    continue;
+                                    if (!has_valid_path(*node.parent, start, neighbor_cell_index))
+                                    {
+                                        continue;
+                                    }
+                                    invalidate_paths(*node.parent, start, neighbor_cell_index);
                                 }
-                                invalidate_paths(*node.parent, start, neighbor_cell_index);
                             }
                             found = true;
                             c->neighbor = i + 1;
@@ -238,7 +237,6 @@ struct WordFinder
                             neighbor_cell.c = '$';
                             ++path_index;
                             c = neighbor_cell_ptr;
-                            ++idx;
                             break;
                         }
                     }
@@ -258,7 +256,6 @@ struct WordFinder
             }
             --path_index;
             grid[path[path_index]].c = board[path[path_index] / n][path[path_index] % n];
-            --idx;
         } while (path_index > 0);
         return !node.paths.paths.empty();
     }
@@ -577,5 +574,6 @@ int main()
     ChronoProfiler::printTime("prune");
     ChronoProfiler::printTime("build_tree");
     ChronoProfiler::printTime("find_words");
+    ChronoProfiler::printTime("process_neighbor");
     return 0;
 }
